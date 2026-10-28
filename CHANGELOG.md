@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 — 2026-10-29
+
+- With `prime-run` (NVIDIA PRIME offload), the game ran on the integrated GPU:
+  it now only sees the NVIDIA GPU.
+
 ## 1.0 — 2026-10-28
 
 First release.

@@ -30,7 +30,7 @@
 # Log of the last launch: ~/.local/state/cod-mw4-linux/mw4-launch.log
 # =============================================================================
 
-MW4_LAUNCH_VERSION=1.0
+MW4_LAUNCH_VERSION=1.0.1
 
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/cod-mw4-linux"
 LAUNCH_LOG="$STATE/mw4-launch.log"
@@ -217,6 +217,14 @@ export __GL_SHADER_DISK_CACHE_SIZE=${__GL_SHADER_DISK_CACHE_SIZE:-12000000000}
 export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}
 # DLSS and Reflex on NVIDIA (some Proton builds leave NVAPI off by default).
 export PROTON_ENABLE_NVAPI=${PROTON_ENABLE_NVAPI:-1}
+# NVIDIA PRIME offload (prime-run, or a launcher's NVIDIA GPU option) doesn't
+# hide the iGPU from Vulkan, which still lists it first, so the game picked it.
+# Only show it the NVIDIA GPU.
+if [[ ${__NV_PRIME_RENDER_OFFLOAD:-} == 1 ]]; then
+    export DXVK_FILTER_DEVICE_NAME=${DXVK_FILTER_DEVICE_NAME:-NVIDIA}
+    export VKD3D_FILTER_DEVICE_NAME=${VKD3D_FILTER_DEVICE_NAME:-NVIDIA}
+    log "NVIDIA PRIME offload: the game only sees the NVIDIA GPU"
+fi
 # Feral GameMode (CPU governor, I/O and scheduler priority), when installed.
 wrapper=()
 if command -v gamemoderun >/dev/null && [[ -z ${MW4_NO_GAMEMODE:-} ]]; then

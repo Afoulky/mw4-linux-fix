@@ -179,6 +179,9 @@ otherwise. Source and patches: `source/` and `SOURCE.txt`.
   small for this game, so shaders got evicted and recompiled, causing stutter. No
   effect on AMD or Intel.
 - `PROTON_ENABLE_NVAPI=1`: DLSS and Reflex on NVIDIA cards.
+- With NVIDIA PRIME offload (`prime-run`, or a launcher's NVIDIA GPU option):
+  `DXVK_FILTER_DEVICE_NAME=NVIDIA` and `VKD3D_FILTER_DEVICE_NAME=NVIDIA`. Vulkan still
+  lists the iGPU first in that case, and the game picked it.
 - **GameMode** (`gamemoderun`), when installed.
 
 The biggest gains are in the game's own settings: DLSS (or FSR/XeSS) in
