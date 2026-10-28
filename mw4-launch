@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  mw4-launch — run COD Modern Warfare 4 (campaign) from a game launcher
+# =============================================================================
+#
+# For launchers that start the game with umu-run / Proton themselves (Kryoto,
+# Hydra, Faugus, Heroic, Steam, Lutris). Put it before %command% in the launch
+# options:
+#
+#     bash ./mw4-launch %command% hdeyguxs3zaumvlgvybm2vyc
+#
+# The launcher keeps its own Proton and prefix; this script does the rest:
+#   1. prepares sp26/rex_sp.dll (once, the original is kept as .orig)
+#   2. copies and enables the fixed D3D12 DLLs (runtime/d3d12*.dll)
+#   3. sets a fixed SteamID so save files keep loading
+#   4. turns HDR off in the game settings
+#   5. fixes low-resolution textures (sp26/xpak_cache link, Steam emulator
+#      connectivity settings)
+#   6. runs bin/codpatch on the game right after it starts
+#   7. sets a few performance options (shader cache size, NVAPI, GameMode)
+#      and starts the game (the launcher's %command%) inside gamescope
+#
+# Options (environment variables, put them in front of "bash ./mw4-launch"):
+#   MW4_GAMESCOPE_ARGS="..."  gamescope options instead of the detected ones
+#   MW4_NO_GAMESCOPE=1        start the game without gamescope
+#   MW4_NO_GAMEMODE=1         don't use gamemoderun
+#   MW4_FPS_LIMIT=60          cap the frame rate (less heat and battery use)
+#   COD_GAME_ROOT=/path       game folder, if it can't be found
+#
+# Log of the last launch: ~/.local/state/cod-mw4-linux/mw4-launch.log
+# =============================================================================
+
+MW4_LAUNCH_VERSION=1.0
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/cod-mw4-linux"
+LAUNCH_LOG="$STATE/mw4-launch.log"
+mkdir -p "$STATE"
+: >"$LAUNCH_LOG"
+
+log() {
+    echo "mw4-launch: $*" >&2
+    echo "$(date +%T) $*" >>"$LAUNCH_LOG"
+}
+
+die() {
+    log "ERROR: $*"
+    exit 1
+}
+
+log "version $MW4_LAUNCH_VERSION, $(date '+%F %T'), kernel $(uname -r)"
+[[ -r /proc/driver/nvidia/version ]] && log "$(head -n 1 /proc/driver/nvidia/version)"
+log "command: $*"
+env | sort >"$STATE/last-launch.env"           # for bug reports, stays local
+[[ -n ${LD_LIBRARY_PATH:-} ]] && log "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+[[ -n ${LD_PRELOAD:-} ]] && log "LD_PRELOAD=$LD_PRELOAD"
+
+# --- Find the game folder ----------------------------------------------------
+# First match among: COD_GAME_ROOT, an .../sp26-cod.exe in the command,
+# Kryoto's KRYOTO_EXECUTABLE, the working directory (or its parent), and this
+# script's own folder (the sp26/mw4-launch relay passes the real one as $0).
+candidates=("${COD_GAME_ROOT:-}")
+for arg in "$@"; do
+    [[ $arg == *sp26-cod.exe ]] && candidates+=("$(dirname -- "$arg")/..")
+done
+[[ -n ${KRYOTO_EXECUTABLE:-} ]] && candidates+=("$(dirname -- "$KRYOTO_EXECUTABLE")/..")
+candidates+=("$PWD" "$PWD/.." "$(dirname -- "${BASH_SOURCE[0]}")")
+for dir in "${candidates[@]}"; do
+    if [[ -n $dir && -f $dir/sp26/sp26-cod.exe ]]; then
+        GAME=$(cd -- "$dir" && pwd)
+        break
+    fi
+done
+[[ -n ${GAME:-} ]] || die "game folder not found: extract the fix next to sp26/, or set COD_GAME_ROOT"
+[[ $# -gt 0 ]] || die "no game command: put %command% after mw4-launch in the launch options"
+log "game folder: $GAME"
+# The Wine prefix, only to edit the game's files in it: launchers set
+# WINEPREFIX, Steam sets STEAM_COMPAT_DATA_PATH (the prefix is its pfx/).
+PREFIX=${WINEPREFIX:-${STEAM_COMPAT_DATA_PATH:+$STEAM_COMPAT_DATA_PATH/pfx}}
+proton=${PROTONPATH:-${STEAM_COMPAT_TOOL_PATHS%%:*}}
+log "prefix: ${PREFIX:-unknown}, Proton: ${proton:-unknown}"
+
+SP26="$GAME/sp26"
+CODPATCH="$GAME/bin/codpatch"
+RUNTIME="$GAME/runtime"
+PATCH_LOG="$STATE/codpatch.log"
+
+# --- Checks ------------------------------------------------------------------
+[[ -f $CODPATCH ]] || die "$CODPATCH not found: the fix files must be in the game folder"
+[[ -x $CODPATCH ]] || chmod +x "$CODPATCH" || die "could not make $CODPATCH executable"
+[[ -f $SP26/rex_sp.dll ]] || die "$SP26/rex_sp.dll not found: SP Offline V2 by .r4v3n is required"
+for dll in d3d12 d3d12core; do
+    [[ -f $RUNTIME/$dll.dll ]] || die "$RUNTIME/$dll.dll is missing: extract the whole zip"
+done
+command -v pgrep >/dev/null || die "pgrep is required: install it (package procps)"
+[[ $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo 0) -lt 2 ]] \
+    || die "ptrace_scope blocks the patcher. Run: sudo sysctl kernel.yama.ptrace_scope=1"
+pgrep -x sp26-cod.exe >/dev/null && die "the game is already running"
+
+# Size + modification time of a file: cheap way to tell it hasn't changed
+# since the last launch, without reading it.
+stamp() { stat -Lc '%s %Y' -- "$1" 2>/dev/null; }
+
+# --- 1. Prepare rex_sp.dll (codpatch returns 0 = stock, 10 = already prepared)
+# Checking it means reading the whole DLL, so it's only done when rex_sp.dll
+# changed since the last launch that found it prepared.
+REX_STAMP="$STATE/rex_sp-$(cksum <<<"$GAME" | cut -d' ' -f1).stamp"
+if [[ $(stamp "$SP26/rex_sp.dll") == "$(cat "$REX_STAMP" 2>/dev/null)" ]]; then
+    rex_state=10
+else
+    "$CODPATCH" --prepare-file "$SP26/rex_sp.dll" >/dev/null 2>&1
+    rex_state=$?
+fi
+case $rex_state in
+    0)  [[ -e $SP26/rex_sp.dll.orig ]] || cp "$SP26/rex_sp.dll" "$SP26/rex_sp.dll.orig" \
+            || die "could not back up rex_sp.dll"
+        "$CODPATCH" --prepare-file "$SP26/rex_sp.dll.orig" "$SP26/rex_sp.dll" \
+            || die "could not prepare rex_sp.dll"
+        log "prepared rex_sp.dll (original: sp26/rex_sp.dll.orig)"
+        stamp "$SP26/rex_sp.dll" >"$REX_STAMP" ;;
+    10) [[ -f $REX_STAMP ]] || stamp "$SP26/rex_sp.dll" >"$REX_STAMP" ;;
+    *)  die "sp26/rex_sp.dll is not the supported SP Offline V2 build" ;;
+esac
+
+# --- 2. Fixed D3D12 DLLs (patched vkd3d-proton) ------------------------------
+# Copied with their timestamps, so an identical size + time means same file.
+for dll in d3d12 d3d12core; do
+    [[ $(stamp "$RUNTIME/$dll.dll") == "$(stamp "$SP26/$dll.dll")" ]] \
+        || cp -p "$RUNTIME/$dll.dll" "$SP26/" || die "could not copy $dll.dll into sp26/"
+done
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}d3d12,d3d12core=n,b"
+
+# --- 3. Fixed SteamID (otherwise saves "disappear" after every exit) ---------
+# Python only runs when one of the settings files still has no ID.
+needs_steamid=
+for ini in "$SP26/steam_settings/configs.user.ini" \
+           "$SP26/steam_settings/local_saves/settings/configs.user.ini"; do
+    [[ -f $ini ]] || continue
+    grep -qE '^[[:space:]]*account_steamid[[:space:]]*=[[:space:]]*7656119[0-9]{10}[[:space:]]*$' "$ini" \
+        || needs_steamid=1
+done
+if [[ -n $needs_steamid ]]; then
+    command -v python3 >/dev/null || die "python3 is required: install it"
+    python3 "$RUNTIME/ensure_steamid.py" \
+        --ini "$SP26/steam_settings/configs.user.ini" \
+        --local-ini "$SP26/steam_settings/local_saves/settings/configs.user.ini" \
+        --players "${PREFIX:-/nonexistent}/drive_c/users/steamuser/AppData/Local/Activision/Call of Duty/players" \
+        || log "warning: could not set the SteamID (saves may not load)"
+fi
+
+# --- 4. HDR off (Automatic makes the game keep polling the display for HDR) -
+SETTINGS="${PREFIX:-/nonexistent}/drive_c/users/steamuser/AppData/Local/Activision/Call of Duty/players/s.1.0.cod26.txt"
+if grep -qE '^HDR@[^=]*= (Automatic|On) ' "$SETTINGS" 2>/dev/null; then
+    [[ -e $SETTINGS.pre-mw4-launch ]] || cp "$SETTINGS" "$SETTINGS.pre-mw4-launch"
+    sed -i -E 's/^(HDR@[^=]*= )(Automatic|On) /\1Off /' "$SETTINGS" \
+        && log "HDR turned off in the game settings"
+fi
+
+# --- 5. Low-resolution textures --------------------------------------------
+# Community fix: the game looks for its texture cache in sp26/xpak_cache while
+# it lives in the game folder, so link it (the Linux side of "mklink /J"), and
+# set the Steam emulator to disable_lan_only=1, offline=0.
+if [[ -d $GAME/xpak_cache && ! -L $SP26/xpak_cache ]]; then
+    [[ -d $SP26/xpak_cache ]] && rmdir "$SP26/xpak_cache" 2>/dev/null   # an empty folder is replaced
+    if [[ -e $SP26/xpak_cache ]]; then
+        log "warning: sp26/xpak_cache is a folder with files, not linking it (textures may stay low-res)"
+    else
+        ln -s ../xpak_cache "$SP26/xpak_cache" && log "linked sp26/xpak_cache to the game's xpak_cache"
+    fi
+fi
+MAIN_INI="$SP26/steam_settings/configs.main.ini"
+if [[ -d $SP26/steam_settings ]]; then
+    # Sets disable_lan_only=1 and offline=0 in [main::connectivity], keeping
+    # every other line; adds the section if it's missing.
+    new_ini=$(cat -- "$MAIN_INI" 2>/dev/null | awk '
+        function flush() { if (!lan) print "disable_lan_only=1"; if (!off) print "offline=0"; lan = off = 1 }
+        /^[[:space:]]*\[/ { if (in_section) flush(); in_section = ($0 ~ /^[[:space:]]*\[main::connectivity\]/); if (in_section) { seen = 1; lan = off = 0 } }
+        in_section && /^[[:space:]]*disable_lan_only[[:space:]]*=/ { print "disable_lan_only=1"; lan = 1; next }
+        in_section && /^[[:space:]]*offline[[:space:]]*=/ { print "offline=0"; off = 1; next }
+        { print }
+        END { if (in_section) flush(); if (!seen) { print "[main::connectivity]"; print "disable_lan_only=1"; print "offline=0" } }
+    ')
+    if [[ $new_ini != "$(cat "$MAIN_INI" 2>/dev/null)" ]]; then
+        [[ ! -f $MAIN_INI || -e $MAIN_INI.pre-mw4-launch ]] || cp "$MAIN_INI" "$MAIN_INI.pre-mw4-launch"
+        printf '%s\n' "$new_ini" >"$MAIN_INI" && log "set disable_lan_only=1, offline=0 in configs.main.ini"
+    fi
+fi
+
+# --- 6. In the background: wait for the game to load rex_sp.dll, then patch --
+# Stops as soon as the launch is over ($$ is this script, which waits for
+# gamescope/the launcher's command), and after at most 2 minutes. Nothing of it
+# is left running while you play.
+(
+    pid=
+    for _ in {1..480}; do
+        pid=$(pgrep -nx sp26-cod.exe) && break
+        kill -0 $$ 2>/dev/null || exit 0      # the launch ended without the game
+        sleep 0.25
+    done
+    [[ -n $pid ]] || { echo "the game did not start" >"$PATCH_LOG"; log "the game did not start"; exit 1; }
+    until grep -qF rex_sp.dll "/proc/$pid/maps" 2>/dev/null; do
+        kill -0 "$pid" 2>/dev/null || exit 1  # game closed in the meantime
+        sleep 0.1
+    done
+    sleep 2
+    "$CODPATCH" --attach "$pid" >"$PATCH_LOG" 2>&1
+    if grep -q ready "$PATCH_LOG"; then
+        log "codpatch: ready (PID $pid)"
+    else
+        log "codpatch FAILED: $(tail -n 1 "$PATCH_LOG")"
+    fi
+) </dev/null >/dev/null 2>&1 &              # don't hold the launcher's log open
+
+# --- Performance (each one is only set if not already set) -------------------
+# NVIDIA keeps compiled shaders in ~/.cache/nvidia; its default 1 GB limit is
+# too small for this game, so shaders got evicted and recompiled (stutter).
+export __GL_SHADER_DISK_CACHE_SIZE=${__GL_SHADER_DISK_CACHE_SIZE:-12000000000}
+export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}
+# DLSS and Reflex on NVIDIA (some Proton builds leave NVAPI off by default).
+export PROTON_ENABLE_NVAPI=${PROTON_ENABLE_NVAPI:-1}
+# Feral GameMode (CPU governor, I/O and scheduler priority), when installed.
+wrapper=()
+if command -v gamemoderun >/dev/null && [[ -z ${MW4_NO_GAMEMODE:-} ]]; then
+    wrapper=(gamemoderun)
+fi
+
+# --- 7. Start the game, inside gamescope -------------------------------------
+# The game only sees gamescope's window, so switching windows on the desktop
+# never takes its focus away (that froze its window thread and tripped its
+# watchdog). Native Wayland must stay off: Wine has to use gamescope's X server.
+if [[ -n ${MW4_NO_GAMESCOPE:-} ]]; then
+    log "starting without gamescope (MW4_NO_GAMESCOPE)${MW4_FPS_LIMIT:+, MW4_FPS_LIMIT ignored}"
+    exec "${wrapper[@]}" "$@"
+fi
+command -v gamescope >/dev/null \
+    || die "gamescope is required: install it (package gamescope), or set MW4_NO_GAMESCOPE=1"
+export PROTON_ENABLE_WAYLAND=0
+
+# Screen size and refresh rate: the primary output from xrandr (X11/XWayland),
+# else the preferred mode of the first connected screen in /sys/class/drm.
+screen_mode() {
+    xrandr --current 2>/dev/null | awk '
+        / connected/ { primary = / connected primary/ ; next }
+        /\*/ && !done {
+            for (i = 2; i <= NF; i++) if ($i ~ /\*/) { sub(/[*+]+/, "", $i); mode = $1 " " $i }
+            if (primary) { print mode; done = 1; exit }
+            if (!first) first = mode
+        }
+        END { if (!done && first) print first }'
+    local status
+    for status in /sys/class/drm/card*-*/status; do
+        [[ $(cat "$status" 2>/dev/null) == connected ]] || continue
+        head -n 1 "$(dirname "$status")/modes" 2>/dev/null
+        return
+    done
+}
+if [[ -z ${MW4_GAMESCOPE_ARGS:-} ]]; then
+    read -r size rate < <(screen_mode | head -n 1)
+    width=${size%x*} height=${size#*x}
+    [[ $width =~ ^[0-9]+$ && $height =~ ^[0-9]+$ ]] || { width=1920 height=1080; }
+    # SDL backend: with the default Wayland one, the mouse is only captured
+    # after the window loses and gets back focus (seen on Hyprland).
+    MW4_GAMESCOPE_ARGS="-W $width -H $height -f --force-grab-cursor --backend sdl"
+    [[ $rate =~ ^[0-9.]+$ ]] && MW4_GAMESCOPE_ARGS+=" -r $(LC_ALL=C printf %.0f "$rate")"
+fi
+# A frame cap is gamescope's game refresh rate (the last -r given wins).
+[[ ${MW4_FPS_LIMIT:-} =~ ^[0-9]+$ ]] && MW4_GAMESCOPE_ARGS+=" -r $MW4_FPS_LIMIT"
+# GPU selection variables make gamescope abort on hybrid-GPU laptops (it must
+# use the GPU the desktop runs on): DRI_PRIME and MESA_VK_DEVICE_SELECT (Faugus'
+# and Heroic's GPU options), VK_DRIVER_FILES and VK_ICD_FILENAMES (Lutris).
+# Gamescope starts without them and the game gets them back, so the chosen GPU
+# is still used.
+game_env=()
+for var in DRI_PRIME MESA_VK_DEVICE_SELECT VK_DRIVER_FILES VK_ICD_FILENAMES; do
+    if [[ -n ${!var:-} ]]; then
+        game_env+=("$var=${!var}")
+        unset "$var"
+    fi
+done
+[[ ${#game_env[@]} -gt 0 ]] && game_env=(env "${game_env[@]}") \
+    && log "passing ${game_env[*]:1} to the game only (they crash gamescope)"
+
+log "gamescope $MW4_GAMESCOPE_ARGS${wrapper[*]:+ (with ${wrapper[*]})}"
+# Not exec'd: the exit status is logged, which tells a gamescope crash apart
+# from the game quitting.
+# shellcheck disable=SC2086  # the options are meant to be split
+"${wrapper[@]}" gamescope $MW4_GAMESCOPE_ARGS -- "${game_env[@]}" "$@" \
+    2> >(tee "$STATE/gamescope.log" >&2)
+status=$?
+log "gamescope exited with code $status$( ((status == 134)) && echo ' (crash: abort)')"
+exit $status

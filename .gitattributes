@@ -1,0 +1,4 @@
+# Never convert line endings: the scripts must keep LF, the DLLs are hashed.
+* -text
+*.dll binary
+bin/codpatch binary

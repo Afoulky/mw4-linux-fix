@@ -1,0 +1,43 @@
+diff --git a/cfg_structurizer.cpp b/cfg_structurizer.cpp
+index 7fcea7b7..252de5cd 100644
+--- a/cfg_structurizer.cpp
++++ b/cfg_structurizer.cpp
+@@ -2114,7 +2114,7 @@ void CFGStructurizer::duplicate_impossible_merge_constructs()
+ 		if (!breaking && node->num_forward_preds() > 1)
+ 			breaking = block_is_ambiguous_switch_merge_block(node);
+ 
+-		if (breaking && !node->ir.operations.empty() && !block_is_control_dependent(node))
++		if (breaking && !block_is_control_dependent(node))
+ 			duplicate_queue.push_back(node);
+ 	}
+ 
+@@ -2647,6 +2647,12 @@ void CFGStructurizer::fixup_phi(PHINode &node)
+ 				hoist_incoming = false;
+ 			}
+ 
++			// A value defined in the PHI block itself can only reach this PHI through a back edge.
++			// Hoisting the incoming block to the PHI block would make the PHI its own predecessor,
++			// and insert_phi() cannot find a frontier for that.
++			if (source_block == node.block)
++				hoist_incoming = false;
++
+ 			// Don't hoist PHI inputs across the loop header boundary.
+ 			if (incoming.block->succ_back_edge && query_reachability(*source_block, *incoming.block->succ_back_edge))
+ 			{
+diff --git a/opcodes/dxil/dxil_resources.cpp b/opcodes/dxil/dxil_resources.cpp
+index c8b549bd..018f4d0d 100644
+--- a/opcodes/dxil/dxil_resources.cpp
++++ b/opcodes/dxil/dxil_resources.cpp
+@@ -240,7 +240,11 @@ bool emit_load_input_instruction(Converter::Impl &impl, const llvm::CallInst *in
+ 				op->add_id(builder.makeUintConstant(0));
+ 			}
+ 			else
+-				op->add_id(impl.get_id_for_value(index));
++			{
++				// AttributeAtVertex's VertexID is i8. Without a forced width, i8 constants
++				// have no SPIR-V type and resolve to ID 0, which also poisons value_map.
++				op->add_id(impl.get_id_for_value(index, 32));
++			}
+ 		}
+ 		if (row_index)
+ 			op->add_id(impl.get_id_for_value(instruction->getOperand(2)));

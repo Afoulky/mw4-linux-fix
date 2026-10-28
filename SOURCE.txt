@@ -1,0 +1,45 @@
+License and source
+===================
+
+runtime/d3d12.dll and runtime/d3d12core.dll are a build of vkd3d-proton
+(LGPL-2.1-or-later) with small changes; dxil-spirv (MIT) is part of it. You
+can replace them with your own build: put your d3d12.dll and d3d12core.dll
+in runtime/ (mw4-launch copies them into sp26/ on the next launch).
+Everything else in this folder (mw4-launch, sp26/mw4-launch, bin/codpatch,
+runtime/ensure_steamid.py) was written for this project and contains no game
+files. "Call of Duty" is a trademark of
+Activision Publishing, Inc.; this project is not affiliated with it.
+
+Upstream
+  vkd3d-proton  https://github.com/HansKristian-Work/vkd3d-proton
+                commit 0bb64c56c8f0dcc11ecc0f6c56e00e4f7bd8d506 (2026-10-13)
+  dxil-spirv    https://github.com/HansKristian-Work/dxil-spirv
+                commit 8434b0639fb2a48ce13aac08a420ecce5d23df0e (2026-10-10),
+                the submodule vkd3d-proton uses at that commit
+
+Changes (included in this folder, in source/)
+  source/vkd3d-proton-small-primitive-cull.patch
+                vkd3d-proton: include/vkd3d_shader.h,
+                libs/vkd3d-shader/dxil.c, libs/vkd3d/device_workarounds.c.
+                A new shader quirk that turns off the small-primitive cull in
+                the two camera triangle-culling shaders of this game, and the
+                shader quirk "prefix_sum_lookback" = FORCE_MIN_WAVE32 together
+                with a change in libs/vkd3d-shader/dxil.c that tells dxil-spirv
+                the minimum subgroup size is 32 for such shaders (about 120
+                added lines).
+  source/dxil-spirv-fixes.patch
+                dxil-spirv: cfg_structurizer.cpp,
+                opcodes/dxil/dxil_resources.cpp. Three small fixes (12 added
+                lines in total).
+  The patches are the exact difference between the upstream commits above
+  and the tree the DLLs were built from.
+
+Build
+  Apply the two patches to the two upstream commits (dxil-spirv is the
+  submodule of vkd3d-proton), then build with the vkd3d-proton script
+  package-release.sh (it needs the mingw-w64 cross compiler, meson and
+  ninja). The DLLs in this folder were then stripped with
+      x86_64-w64-mingw32-strip --strip-unneeded
+  SHA-256 of the result:
+      d3d12.dll      b5385d2bc7da69f5e4ab6089b978cec8099c93e1b9c26b25386f86a3699b8cde
+      d3d12core.dll  01539c83272b0e94744a35ece0187dff0794462b951174d96e3c792f2c72a45e

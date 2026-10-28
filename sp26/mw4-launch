@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Relay so that "bash ./mw4-launch ..." also works when the launcher's working
+# directory is sp26/. The real script is in the game folder.
+exec bash "$(dirname -- "${BASH_SOURCE[0]}")/../mw4-launch" "$@"
