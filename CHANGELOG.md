@@ -1,25 +1,30 @@
 # Changelog
 
+## 1.0.2 — 2026-10-31
+
+With `prime-run`:
+
+- gamescope runs on the NVIDIA GPU: no more graphical glitches.
+- Less shader stutter: the shader cache is kept per NVIDIA driver version.
+
+Always:
+
+- Menu clicks land on the cursor.
+- The game always fills the screen.
+
 ## 1.0.1 — 2026-10-29
 
-- With `prime-run` (NVIDIA PRIME offload), the game ran on the integrated GPU:
-  it now only sees the NVIDIA GPU.
+- With `prime-run`, the game runs on the NVIDIA GPU, not the integrated one.
 
 ## 1.0 — 2026-10-28
 
 First release.
 
-- `mw4-launch` starts the game from any launcher that runs Proton itself: put it
-  in front of the launcher's command. Tested with Kryoto, Hydra, Faugus, Heroic,
-  Steam and Lutris.
-- Prepares `rex_sp.dll` (once), installs the fixed D3D12 DLLs, sets a fixed
-  SteamID so saves keep loading, and runs `bin/codpatch` on the game at startup.
-- Fixes low-resolution textures (`sp26/xpak_cache` link, Steam emulator
-  connectivity settings) and turns HDR off.
-- Runs the game in gamescope (SDL backend): no freeze or exit when switching
-  windows, mouse captured from the start. GPU selection variables set by
-  launchers are given to the game only, as they crash gamescope on hybrid-GPU
-  laptops.
-- Larger NVIDIA shader cache, NVAPI, GameMode, optional frame cap (`MW4_FPS_LIMIT`).
-- Checks that would read large files are skipped once done.
-- Logs in `~/.local/state/cod-mw4-linux/` for bug reports.
+- Starts the game from any launcher that runs Proton: Kryoto, Hydra, Faugus,
+  Heroic, Steam and Lutris tested.
+- Prepares the game files and patches the game at startup.
+- Fixes low-resolution textures and turns HDR off.
+- Runs the game in gamescope: switching windows no longer freezes it.
+- Performance options: larger NVIDIA shader cache, NVAPI, GameMode, optional
+  frame cap.
+- Logs for bug reports in `~/.local/state/cod-mw4-linux/`.

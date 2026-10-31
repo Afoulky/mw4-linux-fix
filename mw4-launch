@@ -30,7 +30,7 @@
 # Log of the last launch: ~/.local/state/cod-mw4-linux/mw4-launch.log
 # =============================================================================
 
-MW4_LAUNCH_VERSION=1.0.1
+MW4_LAUNCH_VERSION=1.0.2
 
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/cod-mw4-linux"
 LAUNCH_LOG="$STATE/mw4-launch.log"
@@ -224,6 +224,17 @@ if [[ ${__NV_PRIME_RENDER_OFFLOAD:-} == 1 ]]; then
     export DXVK_FILTER_DEVICE_NAME=${DXVK_FILTER_DEVICE_NAME:-NVIDIA}
     export VKD3D_FILTER_DEVICE_NAME=${VKD3D_FILTER_DEVICE_NAME:-NVIDIA}
     log "NVIDIA PRIME offload: the game only sees the NVIDIA GPU"
+    # vkd3d-proton won't load a shader cache made by another driver, and then
+    # writes no new one either, so every shader was translated again in game
+    # (stutter). Keep one cache per NVIDIA driver version; older ones go.
+    nv_version=$(cat /sys/module/nvidia/version 2>/dev/null)
+    if [[ -z ${VKD3D_SHADER_CACHE_PATH:-} && -n $nv_version ]]; then
+        export VKD3D_SHADER_CACHE_PATH="$SP26/vkd3d-cache/nvidia-$nv_version"
+        mkdir -p "$VKD3D_SHADER_CACHE_PATH"
+        for old in "$SP26"/vkd3d-cache/nvidia-*; do
+            [[ $old == "$VKD3D_SHADER_CACHE_PATH" ]] || rm -rf -- "${old:?}"
+        done
+    fi
 fi
 # Feral GameMode (CPU governor, I/O and scheduler priority), when installed.
 wrapper=()
@@ -267,11 +278,21 @@ if [[ -z ${MW4_GAMESCOPE_ARGS:-} ]]; then
     [[ $width =~ ^[0-9]+$ && $height =~ ^[0-9]+$ ]] || { width=1920 height=1080; }
     # SDL backend: with the default Wayland one, the mouse is only captured
     # after the window loses and gets back focus (seen on Hyprland).
-    MW4_GAMESCOPE_ARGS="-W $width -H $height -f --force-grab-cursor --backend sdl"
+    MW4_GAMESCOPE_ARGS="-W $width -H $height -f --backend sdl --force-windows-fullscreen"
     [[ $rate =~ ^[0-9.]+$ ]] && MW4_GAMESCOPE_ARGS+=" -r $(LC_ALL=C printf %.0f "$rate")"
 fi
 # A frame cap is gamescope's game refresh rate (the last -r given wins).
 [[ ${MW4_FPS_LIMIT:-} =~ ^[0-9]+$ ]] && MW4_GAMESCOPE_ARGS+=" -r $MW4_FPS_LIMIT"
+# With NVIDIA PRIME offload, gamescope composites on the NVIDIA GPU too: on the
+# iGPU, every frame was copied across GPUs, which caused graphical glitches.
+if [[ ${__NV_PRIME_RENDER_OFFLOAD:-} == 1 && $MW4_GAMESCOPE_ARGS != *--prefer-vk-device* ]]; then
+    for dev in /sys/bus/pci/devices/*; do
+        [[ $(<"$dev/vendor") == 0x10de && $(<"$dev/class") == 0x03* ]] || continue
+        nv_id=$(<"$dev/device")
+        MW4_GAMESCOPE_ARGS+=" --prefer-vk-device 10de:${nv_id#0x}"
+        break
+    done 2>/dev/null
+fi
 # GPU selection variables make gamescope abort on hybrid-GPU laptops (it must
 # use the GPU the desktop runs on): DRI_PRIME and MESA_VK_DEVICE_SELECT (Faugus'
 # and Heroic's GPU options), VK_DRIVER_FILES and VK_ICD_FILENAMES (Lutris).

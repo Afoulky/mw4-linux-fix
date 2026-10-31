@@ -132,7 +132,7 @@ environment settings):
 | Variable | Effect |
 |---|---|
 | `MW4_FPS_LIMIT=60` | Caps the frame rate: less heat, noise and battery use. |
-| `MW4_GAMESCOPE_ARGS="-W 2560 -H 1440 -r 165 -f --force-grab-cursor --backend sdl"` | gamescope options instead of the detected ones. Without `-f`, gamescope is a normal window you can move and resize. Keep `--backend sdl`. |
+| `MW4_GAMESCOPE_ARGS="-W 2560 -H 1440 -r 165 -f --backend sdl --force-windows-fullscreen"` | gamescope options instead of the detected ones. Without `-f`, gamescope is a normal window you can move and resize. Keep `--backend sdl`. |
 | `MW4_NO_GAMESCOPE=1` | Starts the game without gamescope, if gamescope doesn't work on your system. |
 | `MW4_NO_GAMEMODE=1` | Doesn't use GameMode. |
 | `COD_GAME_ROOT=/path/to/game` | Game folder, if it isn't found. |
@@ -161,6 +161,9 @@ On every launch, `mw4-launch`:
    gamescope needs it. GPU selection variables set by launchers (`DRI_PRIME`,
    `MESA_VK_DEVICE_SELECT`, `VK_DRIVER_FILES`, `VK_ICD_FILENAMES`) crash gamescope on
    hybrid-GPU laptops: gamescope starts without them and the game gets them back.
+   With NVIDIA PRIME offload (`prime-run`), gamescope runs on the NVIDIA GPU, like
+   the game (`--prefer-vk-device`): copying every frame from one GPU to the other
+   caused graphical glitches.
 
 Every file it changes is saved first, with a `.orig` or `.pre-mw4-launch` suffix.
 Steps 1 to 5 cost nothing once done.
@@ -182,6 +185,9 @@ otherwise. Source and patches: `source/` and `SOURCE.txt`.
 - With NVIDIA PRIME offload (`prime-run`, or a launcher's NVIDIA GPU option):
   `DXVK_FILTER_DEVICE_NAME=NVIDIA` and `VKD3D_FILTER_DEVICE_NAME=NVIDIA`. Vulkan still
   lists the iGPU first in that case, and the game picked it.
+- Also with PRIME offload, `VKD3D_SHADER_CACHE_PATH=sp26/vkd3d-cache/nvidia-<driver>`:
+  vkd3d-proton refuses a cache made by another driver and then writes no new one, so
+  shaders were translated again while playing. Each driver version gets its own cache.
 - **GameMode** (`gamemoderun`), when installed.
 
 The biggest gains are in the game's own settings: DLSS (or FSR/XeSS) in
@@ -203,8 +209,8 @@ highest setting). On a laptop, `MW4_FPS_LIMIT` keeps it cooler and quieter.
 - **Textures stay low-resolution**: if `sp26/xpak_cache` was already a folder with
   files in it, `mw4-launch` leaves it alone (see the log): move its content into the
   game's `xpak_cache`, delete it, and launch again.
-- **Shaders recompile on every launch**: delete `sp26/vkd3d-proton.cache` and
-  `sp26/shadercache`, then let one launch finish.
+- **Shaders recompile on every launch**: delete `sp26/vkd3d-proton.cache`,
+  `sp26/vkd3d-cache` and `sp26/shadercache`, then let one launch finish.
 
 ### Reporting a problem
 
@@ -226,8 +232,8 @@ game showed an error, the newest folder in
 1. Put `sp26/rex_sp.dll.orig` back as `sp26/rex_sp.dll`.
 2. Put `sp26/steam_settings/configs.main.ini.pre-mw4-launch` back as
    `configs.main.ini` (and `configs.user.ini.pre-mw4-launch`, if present).
-3. Delete `sp26/d3d12.dll`, `sp26/d3d12core.dll`, `sp26/mw4-launch` and the
-   `sp26/xpak_cache` link, then the files from the zip in the game folder.
+3. Delete `sp26/d3d12.dll`, `sp26/d3d12core.dll`, `sp26/mw4-launch`, `sp26/vkd3d-cache`
+   and the `sp26/xpak_cache` link, then the files from the zip in the game folder.
 4. HDR can be turned back on from the game's settings.
 
 ## Credits and license
