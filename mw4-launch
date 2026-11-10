@@ -15,7 +15,7 @@
 #   3. sets a fixed SteamID so save files keep loading
 #   4. turns HDR off in the game settings
 #   5. fixes low-resolution textures (sp26/xpak_cache link, Steam emulator
-#      connectivity settings)
+#      connectivity settings, texture downloads without IPv6)
 #   6. runs bin/codpatch on the game right after it starts
 #   7. sets a few performance options (shader cache size, NVAPI, GameMode)
 #      and starts the game (the launcher's %command%) inside gamescope
@@ -24,13 +24,14 @@
 #   MW4_GAMESCOPE_ARGS="..."  gamescope options instead of the detected ones
 #   MW4_NO_GAMESCOPE=1        start the game without gamescope
 #   MW4_NO_GAMEMODE=1         don't use gamemoderun
+#   MW4_NO_NET_FIX=1          don't load bin/mw4-net.so (texture downloads without IPv6)
 #   MW4_FPS_LIMIT=60          cap the frame rate (less heat and battery use)
 #   COD_GAME_ROOT=/path       game folder, if it can't be found
 #
 # Log of the last launch: ~/.local/state/cod-mw4-linux/mw4-launch.log
 # =============================================================================
 
-MW4_LAUNCH_VERSION=1.0.2
+MW4_LAUNCH_VERSION=1.0.3
 
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/cod-mw4-linux"
 LAUNCH_LOG="$STATE/mw4-launch.log"
@@ -184,6 +185,19 @@ if [[ -d $SP26/steam_settings ]]; then
         printf '%s\n' "$new_ini" >"$MAIN_INI" && log "set disable_lan_only=1, offline=0 in configs.main.ini"
     fi
 fi
+# Without IPv6, the game's texture download never connects (it only accepts
+# an IPv6 answer, then Wine refuses the IPv4 address it gets). bin/mw4-net.so
+# lets those connections go out over IPv4; see source/mw4-net.c.
+# LD_PRELOAD splits paths on spaces and colons, and game folders often have
+# spaces, so it's loaded from a copy in $STATE.
+NET_FIX="$STATE/mw4-net.so"
+if [[ -f $GAME/bin/mw4-net.so && -z ${MW4_NO_NET_FIX:-} ]]; then
+    if [[ $NET_FIX == *[[:space:]:]* ]]; then
+        log "warning: $NET_FIX has a space or colon, texture downloads without IPv6 stay off"
+    elif cmp -s "$GAME/bin/mw4-net.so" "$NET_FIX" || cp "$GAME/bin/mw4-net.so" "$NET_FIX"; then
+        export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$NET_FIX"
+    fi
+fi
 
 # --- 6. In the background: wait for the game to load rex_sp.dll, then patch --
 # Stops as soon as the launch is over ($$ is this script, which waits for
@@ -305,8 +319,14 @@ for var in DRI_PRIME MESA_VK_DEVICE_SELECT VK_DRIVER_FILES VK_ICD_FILENAMES; do
         unset "$var"
     fi
 done
+# Gamescope sets XDG_CURRENT_DESKTOP=gamescope for the game; umu then takes it
+# for a Steam Deck session and clears LD_PRELOAD, which loads mw4-net.so. The
+# game gets the desktop's own value back.
+if [[ ${LD_PRELOAD:-} == *mw4-net.so* && ${XDG_CURRENT_DESKTOP:-} != gamescope ]]; then
+    game_env+=("XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-}")
+fi
 [[ ${#game_env[@]} -gt 0 ]] && game_env=(env "${game_env[@]}") \
-    && log "passing ${game_env[*]:1} to the game only (they crash gamescope)"
+    && log "passing ${game_env[*]:1} to the game only"
 
 log "gamescope $MW4_GAMESCOPE_ARGS${wrapper[*]:+ (with ${wrapper[*]})}"
 # Not exec'd: the exit status is logged, which tells a gamescope crash apart

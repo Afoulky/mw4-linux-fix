@@ -135,6 +135,7 @@ environment settings):
 | `MW4_GAMESCOPE_ARGS="-W 2560 -H 1440 -r 165 -f --backend sdl --force-windows-fullscreen"` | gamescope options instead of the detected ones. Without `-f`, gamescope is a normal window you can move and resize. Keep `--backend sdl`. |
 | `MW4_NO_GAMESCOPE=1` | Starts the game without gamescope, if gamescope doesn't work on your system. |
 | `MW4_NO_GAMEMODE=1` | Doesn't use GameMode. |
+| `MW4_NO_NET_FIX=1` | Doesn't load `bin/mw4-net.so` (texture downloads without IPv6). |
 | `COD_GAME_ROOT=/path/to/game` | Game folder, if it isn't found. |
 
 ## What it does
@@ -150,7 +151,11 @@ On every launch, `mw4-launch`:
 5. **Fixes low-resolution textures**: links `sp26/xpak_cache` to the game's
    `xpak_cache` (the Linux equivalent of the Windows `mklink /J` fix) and sets
    `disable_lan_only=1` and `offline=0` in `[main::connectivity]` of
-   `sp26/steam_settings/configs.main.ini`.
+   `sp26/steam_settings/configs.main.ini`. Without IPv6, the game never downloads its
+   HD textures: it only accepts an IPv6 address for the texture server, and Wine then
+   refuses the IPv4 one it gets. `bin/mw4-net.so`, loaded with the game, lets those
+   connections go out over IPv4 (no sudo, hosts file or proxy needed). It doesn't work
+   from the Steam Deck's game mode, where umu always clears `LD_PRELOAD`.
 6. **Patches the game in memory**: a few seconds after it starts, `bin/codpatch`
    attaches to it, applies the changes it needs to run without the Randgrid driver,
    and detaches. Nothing is attached or left running while you play.
@@ -171,7 +176,8 @@ Steps 1 to 5 cost nothing once done.
 The D3D12 DLLs are a patched vkd3d-proton: three shader compiler fixes, the
 small-triangle cull switched off (it made faces look see-through at a distance), and
 a fixed subgroup size of 32 for one shader that doesn't compile on Intel Arc
-otherwise. Source and patches: `source/` and `SOURCE.txt`.
+otherwise, and less VRAM wasted on small heaps (from
+[MW4-Proton](https://github.com/ektorchristakis/cod-mw4-proton)). Source and patches: `source/` and `SOURCE.txt`.
 
 ## Performance
 
@@ -208,7 +214,9 @@ highest setting). On a laptop, `MW4_FPS_LIMIT` keeps it cooler and quieter.
   `MW4_GAMESCOPE_ARGS` yourself, keep `--backend sdl` in it.
 - **Textures stay low-resolution**: if `sp26/xpak_cache` was already a folder with
   files in it, `mw4-launch` leaves it alone (see the log): move its content into the
-  game's `xpak_cache`, delete it, and launch again.
+  game's `xpak_cache`, delete it, and launch again. The game's `xpak_cache` folder
+  should grow while you play (several GB after a few hours); textures in a new area can
+  look soft for a few seconds while they download.
 - **Shaders recompile on every launch**: delete `sp26/vkd3d-proton.cache`,
   `sp26/vkd3d-cache` and `sp26/shadercache`, then let one launch finish.
 
@@ -243,7 +251,9 @@ all the credit for making it run offline goes to them. The startup patcher
 (`bin/codpatch`) and the patched D3D12 DLLs come from the mw4linux "lumi" Linux fix.
 vkd3d-proton (LGPL-2.1-or-later) and dxil-spirv (MIT) are by Hans-Kristian Arntzen
 and contributors: see `SOURCE.txt` for the source, the patches and how to rebuild
-the DLLs. "Call of Duty" is a trademark of Activision Publishing, Inc.; this project
+the DLLs. The IPv6 texture download issue was found by
+[voidfnc/mw4-texture-streaming-research](https://github.com/voidfnc/mw4-texture-streaming-research).
+"Call of Duty" is a trademark of Activision Publishing, Inc.; this project
 is not affiliated with it.
 
 ### Building a release

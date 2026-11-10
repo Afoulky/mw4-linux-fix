@@ -1,0 +1,17 @@
+diff --git a/libs/vkd3d/memory.c b/libs/vkd3d/memory.c
+index 3928991d..772fca4e 100644
+--- a/libs/vkd3d/memory.c
++++ b/libs/vkd3d/memory.c
+@@ -2204,6 +2204,12 @@ static bool vkd3d_memory_info_allow_suballocate(struct d3d12_device *device,
+     if ((info->flags & VKD3D_ALLOCATION_FLAG_INTERNAL_SCRATCH) || (info->heap_flags & D3D12_HEAP_FLAG_ALLOW_WRITE_WATCH))
+         return false;
+ 
++    /* Small, highly aligned heaps waste most of a suballocation chunk.
++     * A separate allocation provides an aligned base at offset zero. */
++    if (info->memory_requirements.alignment >= D3D12_DEFAULT_MSAA_RESOURCE_PLACEMENT_ALIGNMENT &&
++            info->memory_requirements.size < VKD3D_VA_BLOCK_SIZE)
++        return false;
++
+     /* All suballocated buffers must have a GLOBAL buffer that can be used to clear memory. */
+     if (!(info->flags & VKD3D_ALLOCATION_FLAG_GLOBAL_BUFFER))
+         return false;

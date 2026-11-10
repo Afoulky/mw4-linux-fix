@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3 — 2026-11-10
+
+- HD textures now download without IPv6: `bin/mw4-net.so` lets the game's texture
+  downloads go out over IPv4 (`MW4_NO_NET_FIX=1` turns it off).
+- Less VRAM used: the D3D12 DLLs no longer place small heaps in mostly empty
+  16 MiB pools (patch from MW4-Proton).
+
 ## 1.0.2 — 2026-10-31
 
 With `prime-run`:

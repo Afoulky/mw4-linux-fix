@@ -6,9 +6,9 @@ runtime/d3d12.dll and runtime/d3d12core.dll are a build of vkd3d-proton
 can replace them with your own build: put your d3d12.dll and d3d12core.dll
 in runtime/ (mw4-launch copies them into sp26/ on the next launch).
 Everything else in this folder (mw4-launch, sp26/mw4-launch, bin/codpatch,
-runtime/ensure_steamid.py) was written for this project and contains no game
-files. "Call of Duty" is a trademark of
-Activision Publishing, Inc.; this project is not affiliated with it.
+bin/mw4-net.so built from source/mw4-net.c, runtime/ensure_steamid.py)
+contains no game files. "Call of Duty" is a trademark of Activision
+Publishing, Inc.; this project is not affiliated with it.
 
 Upstream
   vkd3d-proton  https://github.com/HansKristian-Work/vkd3d-proton
@@ -31,15 +31,23 @@ Changes (included in this folder, in source/)
                 dxil-spirv: cfg_structurizer.cpp,
                 opcodes/dxil/dxil_resources.cpp. Three small fixes (12 added
                 lines in total).
+  source/vkd3d-proton-aligned-heaps.patch
+                vkd3d-proton: libs/vkd3d/memory.c. Small heaps that ask for a
+                4 MiB alignment get their own allocation instead of a 16 MiB
+                pool they mostly leave empty (less VRAM used). From MW4-Proton,
+                https://github.com/ektorchristakis/cod-mw4-proton (LGPL-2.1).
   The patches are the exact difference between the upstream commits above
   and the tree the DLLs were built from.
 
 Build
-  Apply the two patches to the two upstream commits (dxil-spirv is the
-  submodule of vkd3d-proton), then build with the vkd3d-proton script
-  package-release.sh (it needs the mingw-w64 cross compiler, meson and
-  ninja). The DLLs in this folder were then stripped with
+  Apply the three patches to the two upstream commits (dxil-spirv is the
+  submodule of vkd3d-proton), then build the 64-bit DLLs (mingw-w64 GCC 16,
+  meson and ninja):
+      meson setup out --cross-file build-win64.txt --buildtype release \
+          -Denable_tests=false -Denable_extras=false
+      ninja -C out
+  The DLLs in this folder were then stripped with
       x86_64-w64-mingw32-strip --strip-unneeded
   SHA-256 of the result:
-      d3d12.dll      b5385d2bc7da69f5e4ab6089b978cec8099c93e1b9c26b25386f86a3699b8cde
-      d3d12core.dll  01539c83272b0e94744a35ece0187dff0794462b951174d96e3c792f2c72a45e
+      d3d12.dll      9edfcac3c8b300a6faff64043b85b9b37c063f7122157e8f27c3805344734f9e
+      d3d12core.dll  c3599676718b08bae4cd9c300663168c7cd312ee15512e183d5a7a3daf75fc6f

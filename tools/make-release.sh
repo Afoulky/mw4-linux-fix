@@ -16,16 +16,21 @@ check_hash() {
     actual=$(sha256sum "$1" | cut -d' ' -f1)
     [[ $actual == "$2" ]] || { echo "$1: wrong SHA-256 ($actual)" >&2; exit 1; }
 }
-check_hash runtime/d3d12.dll b5385d2bc7da69f5e4ab6089b978cec8099c93e1b9c26b25386f86a3699b8cde
-check_hash runtime/d3d12core.dll 01539c83272b0e94744a35ece0187dff0794462b951174d96e3c792f2c72a45e
+check_hash runtime/d3d12.dll 9edfcac3c8b300a6faff64043b85b9b37c063f7122157e8f27c3805344734f9e
+check_hash runtime/d3d12core.dll c3599676718b08bae4cd9c300663168c7cd312ee15512e183d5a7a3daf75fc6f
 
 bash -n mw4-launch
 bash -n sp26/mw4-launch
 
+# bin/mw4-net.so is built from its source, so the zip always matches it.
+command -v gcc >/dev/null || { echo "gcc is required to build bin/mw4-net.so" >&2; exit 1; }
+gcc -O2 -Wall -Wextra -Werror -shared -fPIC -fno-stack-protector -o bin/mw4-net.so source/mw4-net.c
+
 files=(
     mw4-launch sp26/mw4-launch README.md CHANGELOG.md SOURCE.txt
-    bin/codpatch runtime/d3d12.dll runtime/d3d12core.dll runtime/ensure_steamid.py
+    bin/codpatch bin/mw4-net.so runtime/d3d12.dll runtime/d3d12core.dll runtime/ensure_steamid.py
     source/dxil-spirv-fixes.patch source/vkd3d-proton-small-primitive-cull.patch
+    source/vkd3d-proton-aligned-heaps.patch source/mw4-net.c
 )
 for file in "${files[@]}"; do
     [[ -f $file ]] || { echo "missing: $file" >&2; exit 1; }
